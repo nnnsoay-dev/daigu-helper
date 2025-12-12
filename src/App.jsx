@@ -19,9 +19,9 @@ const DaigouApp = () => {
     productName: '',
     spec: '',
     quantity: 1,
-    costKRW: '',
+    costKRW: '',      // 這裡代表總成本 (KRW)
     exchangeRate: '',
-    price: '', // 這裡代表總售價
+    price: '',        // 這裡代表總售價 (TWD)
     status: 'checking',
     note: ''
   });
@@ -117,24 +117,26 @@ const DaigouApp = () => {
     e.preventDefault();
     if (!newOrder.clientCode || !newOrder.productName || !newOrder.price) return;
 
-    let finalCostTWD = 0;
+    // 計算總台幣成本 (直接從 總韓幣成本 換算)
+    let finalTotalCostTWD = 0;
     if (newOrder.costKRW && newOrder.exchangeRate) {
-      finalCostTWD = calculateCostTWD(newOrder.costKRW, newOrder.exchangeRate);
+      finalTotalCostTWD = calculateCostTWD(newOrder.costKRW, newOrder.exchangeRate);
     }
     
     const inputQuantity = Number(newOrder.quantity) || 1;
-    const inputTotalPrice = Number(newOrder.price) || 0;
+    const inputTotalPrice = Number(newOrder.price) || 0; // 總售價
 
     const order = {
       id: Date.now(),
       ...newOrder,
-      costTWD: finalCostTWD,
-      costKRW: Number(newOrder.costKRW) || 0,
+      costTWD: finalTotalCostTWD, // 現在這裡存的是總成本
+      costKRW: Number(newOrder.costKRW) || 0, // 總韓幣成本
       exchangeRate: Number(newOrder.exchangeRate) || 0,
       quantity: inputQuantity,
-      totalPrice: inputTotalPrice,
-      price: inputTotalPrice / inputQuantity, // 相容舊邏輯
-      status: 'checking'
+      totalPrice: inputTotalPrice, // 總售價
+      price: inputTotalPrice / inputQuantity, // (保留欄位) 平均單價
+      status: 'checking',
+      isTotalCost: true // 標記：這是新版邏輯 (總成本)
     };
 
     setOrders([order, ...orders]);
@@ -166,14 +168,22 @@ const DaigouApp = () => {
 
   // --- 統計計算 ---
   const calculateStats = () => {
+    // 計算總營收
     const totalRevenue = orders.reduce((sum, order) => {
       const revenue = order.totalPrice !== undefined ? order.totalPrice : (order.price * (order.quantity || 1));
       return sum + revenue;
     }, 0);
     
+    // 計算總成本
     const totalCost = orders.reduce((sum, order) => {
-      const cost = order.costTWD !== undefined ? order.costTWD : (order.cost || 0);
-      return sum + (cost * (order.quantity || 1));
+      // 判斷是否為新版 (總成本) 邏輯
+      if (order.isTotalCost) {
+        return sum + (order.costTWD || 0);
+      } else {
+        // 舊版邏輯 (單價 * 數量)
+        const unitCost = order.costTWD !== undefined ? order.costTWD : (order.cost || 0);
+        return sum + (unitCost * (order.quantity || 1));
+      }
     }, 0);
 
     const netProfit = totalRevenue - totalCost;
@@ -190,12 +200,10 @@ const DaigouApp = () => {
 
   const stats = calculateStats();
 
-  // --- 即時計算變數 (用於渲染) ---
-  const currentCostTWD = calculateCostTWD(newOrder.costKRW, newOrder.exchangeRate);
-  const currentQuantity = Number(newOrder.quantity) || 1;
-  const currentTotalRevenue = Number(newOrder.price) || 0;
-  const currentTotalCost = currentCostTWD * currentQuantity;
-  const currentProfit = currentTotalRevenue - currentTotalCost;
+  // --- 即時計算變數 (用於渲染預覽) ---
+  const currentTotalCostTWD = calculateCostTWD(newOrder.costKRW, newOrder.exchangeRate); // 總成本
+  const currentTotalRevenue = Number(newOrder.price) || 0; // 總售價
+  const currentProfit = currentTotalRevenue - currentTotalCostTWD; // 利潤 = 總售價 - 總成本
 
   return (
     <div className="min-h-screen bg-[#FDFBF7] text-stone-700 font-sans selection:bg-stone-200">
@@ -211,7 +219,7 @@ const DaigouApp = () => {
       {/* 頂部標題 */}
       <header className="fixed top-0 left-0 right-0 bg-[#FDFBF7]/90 backdrop-blur-md z-10 px-6 py-4 border-b border-stone-100">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
-          <h1 className="text-2xl font-bold tracking-tight text-stone-800">代購利潤<span className="text-stone-400">計算表</span></h1>
+          <h1 className="text-xl font-bold tracking-tight text-stone-800">代購利潤計算表</h1>
           <div className="flex items-center gap-3">
              <div className="text-xs text-stone-400 font-medium px-3 py-1 bg-stone-100 rounded-full">
               {orders.length} 筆
@@ -314,14 +322,14 @@ const DaigouApp = () => {
 
                 <div className="grid grid-cols-2 gap-4 bg-stone-50 p-3 rounded-2xl border border-stone-100">
                   <div>
-                    <label className="block text-xs font-medium text-stone-500 mb-1 ml-1">成本 (KRW)</label>
+                    <label className="block text-xs font-medium text-stone-500 mb-1 ml-1">總成本 (KRW)</label>
                     <input
                       type="number"
                       name="costKRW"
                       value={newOrder.costKRW}
                       onChange={handleInputChange}
                       className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300 text-stone-700"
-                      placeholder="₩"
+                      placeholder="₩ (全部數量)"
                     />
                   </div>
                   <div>
@@ -337,7 +345,7 @@ const DaigouApp = () => {
                     />
                   </div>
                   <div className="col-span-2 text-right text-xs text-stone-400">
-                    折合台幣成本：<span className="font-medium text-stone-600">{formatCurrency(currentCostTWD)}</span> / 個
+                    折合台幣總成本：<span className="font-medium text-stone-600">{formatCurrency(currentTotalCostTWD)}</span>
                   </div>
                 </div>
 
@@ -399,9 +407,20 @@ const DaigouApp = () => {
                orders.map((order) => {
                   const clientName = order.clientCode || order.clientName; 
                   const qty = order.quantity || 1;
-                  const cost = order.costTWD !== undefined ? order.costTWD : (order.cost || 0);
+                  
+                  // 計算營收：優先使用 totalPrice，否則用 單價*數量
                   const revenue = order.totalPrice !== undefined ? order.totalPrice : (order.price * qty);
-                  const profit = revenue - (cost * qty);
+                  
+                  // 計算成本：判斷是總成本(新)還是單個成本(舊)
+                  let totalOrderCost = 0;
+                  if (order.isTotalCost) {
+                     totalOrderCost = order.costTWD || 0;
+                  } else {
+                     const unitCost = order.costTWD !== undefined ? order.costTWD : (order.cost || 0);
+                     totalOrderCost = unitCost * qty;
+                  }
+
+                  const profit = revenue - totalOrderCost;
                   const currentStatusKey = statusConfig[order.status] ? order.status : 'checking';
                   const currentStatusConfig = statusConfig[currentStatusKey];
 
@@ -555,7 +574,7 @@ const DaigouApp = () => {
           </div>
         )}
 
-        {/* 4. 設定頁面 (新功能) */}
+        {/* 4. 設定頁面 */}
         {activeTab === 'settings' && (
           <div className="max-w-md mx-auto fade-in">
              <div className="bg-white p-6 rounded-3xl shadow-sm border border-stone-100">
