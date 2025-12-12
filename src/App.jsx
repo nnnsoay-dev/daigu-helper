@@ -3,15 +3,21 @@ import {
   PlusCircle, Package, DollarSign, Trash2, Settings, Download, Upload, 
   AlertCircle, ShoppingBag, Truck, CheckCircle, Clock, Calculator, 
   Store, Calendar, Tag, Users, Plane, ClipboardList, Send, CreditCard,
-  Check, Circle, XCircle
+  Check, Circle, Edit, X, Filter
 } from 'lucide-react';
 
 const DaigouApp = () => {
   // --- 狀態管理 ---
-  const [activeTab, setActiveTab] = useState('orders'); // orders, tracking, profit, settings
+  const [activeTab, setActiveTab] = useState('orders'); 
   const [orders, setOrders] = useState([]);
   const fileInputRef = useRef(null);
   
+  // 篩選狀態
+  const [showAllOrders, setShowAllOrders] = useState(false);
+
+  // 編輯模式狀態
+  const [editingOrder, setEditingOrder] = useState(null);
+
   // 新訂單表單狀態
   const [newOrder, setNewOrder] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -20,11 +26,12 @@ const DaigouApp = () => {
     productName: '',
     spec: '',
     quantity: 1,
-    costKRW: '',      // 總成本 (KRW)
+    costKRW: '',      
     exchangeRate: '',
-    price: '',        // 總售價 (TWD)
+    price: '',        
     status: 'checking',
-    isPaid: false,    // 新增：收款狀態
+    isPaid: false,          // 商品款項
+    isShippingPaid: false,  // 新增：國際運費款項
     note: ''
   });
 
@@ -97,7 +104,7 @@ const DaigouApp = () => {
   // --- 狀態設定 ---
   const statusConfig = {
     checking:      { label: '確認中',       color: 'bg-stone-100 text-stone-600', icon: <Clock size={14} /> },
-    paid:          { label: '已匯款',       color: 'bg-blue-50 text-blue-600',    icon: <CreditCard size={14} /> }, // 這裡保留給"狀態"使用，但我們現在也有獨立的 isPaid 欄位
+    paid:          { label: '已匯款',       color: 'bg-blue-50 text-blue-600',    icon: <CreditCard size={14} /> },
     verified:      { label: '對帳完成',     color: 'bg-indigo-50 text-indigo-600', icon: <CheckCircle size={14} /> },
     ordered_kr:    { label: '韓國端下單',   color: 'bg-orange-50 text-orange-600', icon: <ShoppingBag size={14} /> },
     shipped_kr:    { label: '韓國端出貨',   color: 'bg-amber-50 text-amber-600',   icon: <Truck size={14} /> },
@@ -113,6 +120,11 @@ const DaigouApp = () => {
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setNewOrder({ ...newOrder, [name]: value });
+  };
+
+  const handleEditChange = (e) => {
+    const { name, value } = e.target;
+    setEditingOrder({ ...editingOrder, [name]: value });
   };
 
   const addOrder = (e) => {
@@ -138,7 +150,8 @@ const DaigouApp = () => {
       price: inputTotalPrice / inputQuantity,
       status: 'checking',
       isTotalCost: true,
-      isPaid: newOrder.isPaid // 儲存收款狀態
+      isPaid: newOrder.isPaid,
+      isShippingPaid: newOrder.isShippingPaid
     };
 
     setOrders([order, ...orders]);
@@ -153,10 +166,39 @@ const DaigouApp = () => {
       exchangeRate: newOrder.exchangeRate, 
       price: '', 
       status: 'checking', 
-      isPaid: false, // 重置
+      isPaid: false,
+      isShippingPaid: false,
       note: '' 
     });
     alert('訂單已成立！');
+  };
+
+  // 更新訂單 (編輯模式用)
+  const updateOrder = (e) => {
+    e.preventDefault();
+    if (!editingOrder) return;
+
+    // 重新計算成本 (防止編輯時沒更新到)
+    let finalTotalCostTWD = editingOrder.costTWD;
+    if (editingOrder.costKRW && editingOrder.exchangeRate) {
+      finalTotalCostTWD = calculateCostTWD(editingOrder.costKRW, editingOrder.exchangeRate);
+    }
+
+    const inputQuantity = Number(editingOrder.quantity) || 1;
+    const inputTotalPrice = Number(editingOrder.price) || 0; // 這裡的 price 對應 totalPrice 欄位
+
+    const updatedOrder = {
+      ...editingOrder,
+      costTWD: finalTotalCostTWD,
+      costKRW: Number(editingOrder.costKRW) || 0,
+      exchangeRate: Number(editingOrder.exchangeRate) || 0,
+      quantity: inputQuantity,
+      totalPrice: inputTotalPrice,
+      price: inputTotalPrice / inputQuantity,
+    };
+
+    setOrders(orders.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+    setEditingOrder(null); // 關閉編輯視窗
   };
 
   const updateStatus = (id, newStatus) => {
@@ -166,6 +208,11 @@ const DaigouApp = () => {
   // 切換收款狀態
   const togglePaid = (id) => {
     setOrders(orders.map(order => order.id === id ? { ...order, isPaid: !order.isPaid } : order));
+  };
+
+  // 切換運費狀態
+  const toggleShippingPaid = (id) => {
+    setOrders(orders.map(order => order.id === id ? { ...order, isShippingPaid: !order.isShippingPaid } : order));
   };
 
   const deleteOrder = (id) => {
@@ -209,8 +256,15 @@ const DaigouApp = () => {
   const currentTotalRevenue = Number(newOrder.price) || 0;
   const currentProfit = currentTotalRevenue - currentTotalCostTWD;
 
+  // --- 篩選訂單邏輯 ---
+  // 顯示規則：如果是 "顯示全部"，則顯示所有訂單。
+  // 否則，過濾掉 "completed" 狀態的訂單，並只取前 5 筆 (假設 orders[0] 是最新的)。
+  const visibleOrders = showAllOrders 
+    ? orders 
+    : orders.filter(o => o.status !== 'completed').slice(0, 5);
+
   return (
-    <div className="min-h-screen bg-[#FDFBF7] text-stone-700 font-sans selection:bg-stone-200">
+    <div className="min-h-screen bg-[#FDFBF7] text-stone-700 font-sans selection:bg-stone-200 relative">
       {/* 隱藏的檔案輸入框 */}
       <input 
         type="file" 
@@ -366,17 +420,31 @@ const DaigouApp = () => {
                   />
                 </div>
                 
-                {/* 新增：收款狀態勾選框 */}
-                <div 
-                  className="flex items-center gap-3 bg-stone-50 p-3 rounded-xl cursor-pointer hover:bg-stone-100 transition-colors"
-                  onClick={() => setNewOrder({...newOrder, isPaid: !newOrder.isPaid})}
-                >
-                   <div className={`w-6 h-6 rounded-lg border flex items-center justify-center transition-all ${newOrder.isPaid ? 'bg-green-500 border-green-500 text-white' : 'bg-white border-stone-300 text-transparent'}`}>
-                     <Check size={16} strokeWidth={3} />
-                   </div>
-                   <span className={`text-sm font-medium ${newOrder.isPaid ? 'text-green-600' : 'text-stone-500'}`}>
-                     {newOrder.isPaid ? '已收到款項' : '尚未收款'}
-                   </span>
+                {/* 收款狀態勾選框 (改為兩顆按鈕並排) */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div 
+                    className="flex items-center gap-2 bg-stone-50 p-3 rounded-xl cursor-pointer hover:bg-stone-100 transition-colors"
+                    onClick={() => setNewOrder({...newOrder, isPaid: !newOrder.isPaid})}
+                  >
+                     <div className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${newOrder.isPaid ? 'bg-green-500 border-green-500 text-white' : 'bg-white border-stone-300 text-transparent'}`}>
+                       <Check size={14} strokeWidth={3} />
+                     </div>
+                     <span className={`text-sm font-medium ${newOrder.isPaid ? 'text-green-600' : 'text-stone-500'}`}>
+                       商品已收款
+                     </span>
+                  </div>
+
+                  <div 
+                    className="flex items-center gap-2 bg-stone-50 p-3 rounded-xl cursor-pointer hover:bg-stone-100 transition-colors"
+                    onClick={() => setNewOrder({...newOrder, isShippingPaid: !newOrder.isShippingPaid})}
+                  >
+                     <div className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${newOrder.isShippingPaid ? 'bg-blue-500 border-blue-500 text-white' : 'bg-white border-stone-300 text-transparent'}`}>
+                       <Check size={14} strokeWidth={3} />
+                     </div>
+                     <span className={`text-sm font-medium ${newOrder.isShippingPaid ? 'text-blue-600' : 'text-stone-500'}`}>
+                       運費已匯款
+                     </span>
+                  </div>
                 </div>
 
                 <div className="flex justify-between items-center bg-stone-800 text-stone-100 px-4 py-3 rounded-2xl shadow-sm">
@@ -415,13 +483,32 @@ const DaigouApp = () => {
         {/* 2. 貨況追蹤頁面 */}
         {activeTab === 'tracking' && (
           <div className="space-y-4 pb-20 fade-in">
+             {/* 篩選與空狀態控制 */}
+             <div className="flex justify-between items-center mb-2 px-1">
+                <h3 className="text-sm font-bold text-stone-500">
+                  {showAllOrders ? '所有訂單' : '待辦事項 (近5筆)'}
+                </h3>
+                <button 
+                  onClick={() => setShowAllOrders(!showAllOrders)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${showAllOrders ? 'bg-stone-700 text-white shadow-md' : 'bg-white text-stone-500 border border-stone-200'}`}
+                >
+                  <Filter size={12} />
+                  {showAllOrders ? '顯示全部' : '只看待辦'}
+                </button>
+             </div>
+
              {orders.length === 0 ? (
                <div className="text-center py-20 text-stone-400">
                  <Package size={48} className="mx-auto mb-4 opacity-50" />
                  <p>目前沒有訂單，去新增一筆吧！</p>
                </div>
+             ) : visibleOrders.length === 0 ? (
+                <div className="text-center py-20 text-stone-400">
+                  <CheckCircle size={48} className="mx-auto mb-4 opacity-50 text-green-300" />
+                  <p>太棒了！目前沒有待辦事項。<br/>點擊右上方「顯示全部」查看歷史紀錄。</p>
+                </div>
              ) : (
-               orders.map((order) => {
+               visibleOrders.map((order) => {
                   const clientName = order.clientCode || order.clientName; 
                   const qty = order.quantity || 1;
                   const revenue = order.totalPrice !== undefined ? order.totalPrice : (order.price * qty);
@@ -439,7 +526,7 @@ const DaigouApp = () => {
                   const currentStatusConfig = statusConfig[currentStatusKey];
 
                   return (
-                    <div key={order.id} className="bg-white p-5 rounded-3xl shadow-sm border border-stone-100 relative group">
+                    <div key={order.id} className="bg-white p-5 rounded-3xl shadow-sm border border-stone-100 relative group transition-all hover:shadow-md">
                       <div className="flex justify-between items-start mb-3">
                         <div className="flex flex-col gap-2 w-[85%]">
                            <div className="flex items-center gap-2 flex-wrap">
@@ -458,18 +545,33 @@ const DaigouApp = () => {
                                    </span>
                               )}
                               
-                              {/* 款項狀態按鈕 (顯示在上方資訊列) */}
-                              <button
-                                onClick={() => togglePaid(order.id)}
-                                className={`text-[10px] font-medium px-2 py-1 rounded-full flex items-center gap-1 transition-colors border ${
-                                  order.isPaid 
-                                    ? 'bg-green-50 text-green-600 border-green-200 hover:bg-green-100' 
-                                    : 'bg-stone-50 text-stone-400 border-stone-200 hover:bg-stone-100 hover:text-stone-500'
-                                }`}
-                              >
-                                {order.isPaid ? <CheckCircle size={10} /> : <Circle size={10} />}
-                                {order.isPaid ? '已匯款' : '未匯款'}
-                              </button>
+                              {/* 款項狀態按鈕群組 */}
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={() => togglePaid(order.id)}
+                                  className={`text-[10px] font-medium px-2 py-1 rounded-full flex items-center gap-1 transition-colors border ${
+                                    order.isPaid 
+                                      ? 'bg-green-50 text-green-600 border-green-200 hover:bg-green-100' 
+                                      : 'bg-stone-50 text-stone-400 border-stone-200 hover:bg-stone-100 hover:text-stone-500'
+                                  }`}
+                                  title="商品款項"
+                                >
+                                  {order.isPaid ? <CheckCircle size={10} /> : <Circle size={10} />}
+                                  {order.isPaid ? '已收' : '未收'}
+                                </button>
+                                <button
+                                  onClick={() => toggleShippingPaid(order.id)}
+                                  className={`text-[10px] font-medium px-2 py-1 rounded-full flex items-center gap-1 transition-colors border ${
+                                    order.isShippingPaid 
+                                      ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100' 
+                                      : 'bg-stone-50 text-stone-400 border-stone-200 hover:bg-stone-100 hover:text-stone-500'
+                                  }`}
+                                  title="國際運費"
+                                >
+                                  <Plane size={10} />
+                                  {order.isShippingPaid ? '運費OK' : '運費未付'}
+                                </button>
+                              </div>
                            </div>
                            
                            {order.note && (
@@ -479,12 +581,20 @@ const DaigouApp = () => {
                            )}
                         </div>
 
-                        <button 
-                          onClick={() => deleteOrder(order.id)}
-                          className="text-stone-300 hover:text-red-400 p-1 transition-colors flex-shrink-0"
-                        >
-                          <Trash2 size={18} />
-                        </button>
+                        <div className="flex gap-2 flex-shrink-0">
+                          <button 
+                            onClick={() => setEditingOrder(order)}
+                            className="text-stone-300 hover:text-blue-400 p-1 transition-colors"
+                          >
+                            <Edit size={18} />
+                          </button>
+                          <button 
+                            onClick={() => deleteOrder(order.id)}
+                            className="text-stone-300 hover:text-red-400 p-1 transition-colors"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
                       </div>
 
                       <div className="flex justify-between items-start mb-2">
@@ -648,6 +758,106 @@ const DaigouApp = () => {
         )}
 
       </main>
+
+      {/* 編輯視窗 Modal */}
+      {editingOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/50 backdrop-blur-sm fade-in">
+           <div className="bg-white rounded-3xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
+              <div className="p-6">
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-xl font-bold text-stone-700 flex items-center gap-2">
+                    <Edit className="text-blue-400" />
+                    編輯訂單
+                  </h3>
+                  <button onClick={() => setEditingOrder(null)} className="text-stone-400 hover:text-stone-600 p-1">
+                    <X size={24} />
+                  </button>
+                </div>
+                
+                <form onSubmit={updateOrder} className="space-y-4">
+                   <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-stone-500 mb-1 ml-1">日期</label>
+                        <input type="date" name="date" value={editingOrder.date} onChange={handleEditChange} className="w-full bg-stone-50 border border-stone-200 rounded-2xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300 text-stone-700" required />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-stone-500 mb-1 ml-1">代號</label>
+                        <input type="text" name="clientCode" value={editingOrder.clientCode} onChange={handleEditChange} className="w-full bg-stone-50 border border-stone-200 rounded-2xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300 text-stone-700" required />
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="col-span-1">
+                        <label className="block text-xs font-medium text-stone-500 mb-1 ml-1">店家</label>
+                        <input type="text" name="store" value={editingOrder.store} onChange={handleEditChange} className="w-full bg-stone-50 border border-stone-200 rounded-2xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300 text-stone-700" />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-xs font-medium text-stone-500 mb-1 ml-1">商品名稱</label>
+                        <input type="text" name="productName" value={editingOrder.productName} onChange={handleEditChange} className="w-full bg-stone-50 border border-stone-200 rounded-2xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300 text-stone-700" required />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="col-span-2">
+                        <label className="block text-xs font-medium text-stone-500 mb-1 ml-1">規格</label>
+                        <input type="text" name="spec" value={editingOrder.spec} onChange={handleEditChange} className="w-full bg-stone-50 border border-stone-200 rounded-2xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300 text-stone-700" />
+                      </div>
+                      <div className="col-span-1">
+                        <label className="block text-xs font-medium text-stone-500 mb-1 ml-1">數量</label>
+                        <input type="number" name="quantity" value={editingOrder.quantity} onChange={handleEditChange} className="w-full bg-stone-50 border border-stone-200 rounded-2xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300 text-stone-700 text-center" required />
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4 bg-stone-50 p-3 rounded-2xl border border-stone-100">
+                      <div>
+                        <label className="block text-xs font-medium text-stone-500 mb-1 ml-1">總成本 (KRW)</label>
+                        <input type="number" name="costKRW" value={editingOrder.costKRW} onChange={handleEditChange} className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300 text-stone-700" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-stone-500 mb-1 ml-1">匯率</label>
+                        <input type="number" step="0.0001" name="exchangeRate" value={editingOrder.exchangeRate} onChange={handleEditChange} className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300 text-stone-700" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-stone-500 mb-1 ml-1">總售價 (TWD)</label>
+                      <input type="number" name="price" value={editingOrder.price || editingOrder.totalPrice} onChange={handleEditChange} className="w-full bg-stone-50 border border-stone-200 rounded-2xl px-4 py-3 text-lg font-bold focus:outline-none focus:ring-2 focus:ring-stone-300 text-stone-700" required />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                       <div 
+                        className="flex items-center gap-2 bg-stone-50 p-3 rounded-xl cursor-pointer"
+                        onClick={() => setEditingOrder({...editingOrder, isPaid: !editingOrder.isPaid})}
+                       >
+                          <div className={`w-5 h-5 rounded border flex items-center justify-center ${editingOrder.isPaid ? 'bg-green-500 border-green-500 text-white' : 'bg-white border-stone-300'}`}>
+                            <Check size={14} strokeWidth={3} />
+                          </div>
+                          <span className="text-sm font-medium text-stone-600">商品收款</span>
+                       </div>
+                       <div 
+                        className="flex items-center gap-2 bg-stone-50 p-3 rounded-xl cursor-pointer"
+                        onClick={() => setEditingOrder({...editingOrder, isShippingPaid: !editingOrder.isShippingPaid})}
+                       >
+                          <div className={`w-5 h-5 rounded border flex items-center justify-center ${editingOrder.isShippingPaid ? 'bg-blue-500 border-blue-500 text-white' : 'bg-white border-stone-300'}`}>
+                            <Check size={14} strokeWidth={3} />
+                          </div>
+                          <span className="text-sm font-medium text-stone-600">運費匯款</span>
+                       </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-stone-500 mb-1 ml-1">備註</label>
+                      <textarea name="note" value={editingOrder.note} onChange={handleEditChange} className="w-full bg-stone-50 border border-stone-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300 text-stone-700" rows="2" />
+                    </div>
+
+                    <button type="submit" className="w-full bg-stone-700 hover:bg-stone-800 text-white font-medium py-3.5 rounded-2xl shadow-md mt-2">
+                      儲存變更
+                    </button>
+                </form>
+              </div>
+           </div>
+        </div>
+      )}
 
       {/* 底部導航欄 */}
       <nav className="fixed bottom-6 left-1/2 transform -translate-x-1/2 w-[95%] max-w-md bg-stone-800 text-stone-400 rounded-full shadow-xl shadow-stone-300/50 p-2 z-20 flex justify-between items-center">
