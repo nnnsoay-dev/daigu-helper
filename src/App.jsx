@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   PlusCircle, Package, DollarSign, Trash2, Settings, Download, Upload, 
   AlertCircle, ShoppingBag, Truck, CheckCircle, Clock, Calculator, 
-  Store, Calendar, Tag, Users, Plane, ClipboardList, Send, CreditCard 
+  Store, Calendar, Tag, Users, Plane, ClipboardList, Send, CreditCard,
+  Check, Circle, XCircle
 } from 'lucide-react';
 
 const DaigouApp = () => {
@@ -19,10 +20,11 @@ const DaigouApp = () => {
     productName: '',
     spec: '',
     quantity: 1,
-    costKRW: '',      // 這裡代表總成本 (KRW)
+    costKRW: '',      // 總成本 (KRW)
     exchangeRate: '',
-    price: '',        // 這裡代表總售價 (TWD)
+    price: '',        // 總售價 (TWD)
     status: 'checking',
+    isPaid: false,    // 新增：收款狀態
     note: ''
   });
 
@@ -95,7 +97,7 @@ const DaigouApp = () => {
   // --- 狀態設定 ---
   const statusConfig = {
     checking:      { label: '確認中',       color: 'bg-stone-100 text-stone-600', icon: <Clock size={14} /> },
-    paid:          { label: '已匯款',       color: 'bg-blue-50 text-blue-600',    icon: <CreditCard size={14} /> },
+    paid:          { label: '已匯款',       color: 'bg-blue-50 text-blue-600',    icon: <CreditCard size={14} /> }, // 這裡保留給"狀態"使用，但我們現在也有獨立的 isPaid 欄位
     verified:      { label: '對帳完成',     color: 'bg-indigo-50 text-indigo-600', icon: <CheckCircle size={14} /> },
     ordered_kr:    { label: '韓國端下單',   color: 'bg-orange-50 text-orange-600', icon: <ShoppingBag size={14} /> },
     shipped_kr:    { label: '韓國端出貨',   color: 'bg-amber-50 text-amber-600',   icon: <Truck size={14} /> },
@@ -117,26 +119,26 @@ const DaigouApp = () => {
     e.preventDefault();
     if (!newOrder.clientCode || !newOrder.productName || !newOrder.price) return;
 
-    // 計算總台幣成本 (直接從 總韓幣成本 換算)
     let finalTotalCostTWD = 0;
     if (newOrder.costKRW && newOrder.exchangeRate) {
       finalTotalCostTWD = calculateCostTWD(newOrder.costKRW, newOrder.exchangeRate);
     }
     
     const inputQuantity = Number(newOrder.quantity) || 1;
-    const inputTotalPrice = Number(newOrder.price) || 0; // 總售價
+    const inputTotalPrice = Number(newOrder.price) || 0;
 
     const order = {
       id: Date.now(),
       ...newOrder,
-      costTWD: finalTotalCostTWD, // 現在這裡存的是總成本
-      costKRW: Number(newOrder.costKRW) || 0, // 總韓幣成本
+      costTWD: finalTotalCostTWD,
+      costKRW: Number(newOrder.costKRW) || 0,
       exchangeRate: Number(newOrder.exchangeRate) || 0,
       quantity: inputQuantity,
-      totalPrice: inputTotalPrice, // 總售價
-      price: inputTotalPrice / inputQuantity, // (保留欄位) 平均單價
+      totalPrice: inputTotalPrice,
+      price: inputTotalPrice / inputQuantity,
       status: 'checking',
-      isTotalCost: true // 標記：這是新版邏輯 (總成本)
+      isTotalCost: true,
+      isPaid: newOrder.isPaid // 儲存收款狀態
     };
 
     setOrders([order, ...orders]);
@@ -151,6 +153,7 @@ const DaigouApp = () => {
       exchangeRate: newOrder.exchangeRate, 
       price: '', 
       status: 'checking', 
+      isPaid: false, // 重置
       note: '' 
     });
     alert('訂單已成立！');
@@ -158,6 +161,11 @@ const DaigouApp = () => {
 
   const updateStatus = (id, newStatus) => {
     setOrders(orders.map(order => order.id === id ? { ...order, status: newStatus } : order));
+  };
+
+  // 切換收款狀態
+  const togglePaid = (id) => {
+    setOrders(orders.map(order => order.id === id ? { ...order, isPaid: !order.isPaid } : order));
   };
 
   const deleteOrder = (id) => {
@@ -168,19 +176,15 @@ const DaigouApp = () => {
 
   // --- 統計計算 ---
   const calculateStats = () => {
-    // 計算總營收
     const totalRevenue = orders.reduce((sum, order) => {
       const revenue = order.totalPrice !== undefined ? order.totalPrice : (order.price * (order.quantity || 1));
       return sum + revenue;
     }, 0);
     
-    // 計算總成本
     const totalCost = orders.reduce((sum, order) => {
-      // 判斷是否為新版 (總成本) 邏輯
       if (order.isTotalCost) {
         return sum + (order.costTWD || 0);
       } else {
-        // 舊版邏輯 (單價 * 數量)
         const unitCost = order.costTWD !== undefined ? order.costTWD : (order.cost || 0);
         return sum + (unitCost * (order.quantity || 1));
       }
@@ -200,10 +204,10 @@ const DaigouApp = () => {
 
   const stats = calculateStats();
 
-  // --- 即時計算變數 (用於渲染預覽) ---
-  const currentTotalCostTWD = calculateCostTWD(newOrder.costKRW, newOrder.exchangeRate); // 總成本
-  const currentTotalRevenue = Number(newOrder.price) || 0; // 總售價
-  const currentProfit = currentTotalRevenue - currentTotalCostTWD; // 利潤 = 總售價 - 總成本
+  // --- 即時計算變數 ---
+  const currentTotalCostTWD = calculateCostTWD(newOrder.costKRW, newOrder.exchangeRate);
+  const currentTotalRevenue = Number(newOrder.price) || 0;
+  const currentProfit = currentTotalRevenue - currentTotalCostTWD;
 
   return (
     <div className="min-h-screen bg-[#FDFBF7] text-stone-700 font-sans selection:bg-stone-200">
@@ -329,7 +333,7 @@ const DaigouApp = () => {
                       value={newOrder.costKRW}
                       onChange={handleInputChange}
                       className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-stone-300 text-stone-700"
-                      placeholder="₩ (全部數量)"
+                      placeholder="₩"
                     />
                   </div>
                   <div>
@@ -360,6 +364,19 @@ const DaigouApp = () => {
                     placeholder="NT$ 訂單總金額"
                     required
                   />
+                </div>
+                
+                {/* 新增：收款狀態勾選框 */}
+                <div 
+                  className="flex items-center gap-3 bg-stone-50 p-3 rounded-xl cursor-pointer hover:bg-stone-100 transition-colors"
+                  onClick={() => setNewOrder({...newOrder, isPaid: !newOrder.isPaid})}
+                >
+                   <div className={`w-6 h-6 rounded-lg border flex items-center justify-center transition-all ${newOrder.isPaid ? 'bg-green-500 border-green-500 text-white' : 'bg-white border-stone-300 text-transparent'}`}>
+                     <Check size={16} strokeWidth={3} />
+                   </div>
+                   <span className={`text-sm font-medium ${newOrder.isPaid ? 'text-green-600' : 'text-stone-500'}`}>
+                     {newOrder.isPaid ? '已收到款項' : '尚未收款'}
+                   </span>
                 </div>
 
                 <div className="flex justify-between items-center bg-stone-800 text-stone-100 px-4 py-3 rounded-2xl shadow-sm">
@@ -407,11 +424,8 @@ const DaigouApp = () => {
                orders.map((order) => {
                   const clientName = order.clientCode || order.clientName; 
                   const qty = order.quantity || 1;
-                  
-                  // 計算營收：優先使用 totalPrice，否則用 單價*數量
                   const revenue = order.totalPrice !== undefined ? order.totalPrice : (order.price * qty);
                   
-                  // 計算成本：判斷是總成本(新)還是單個成本(舊)
                   let totalOrderCost = 0;
                   if (order.isTotalCost) {
                      totalOrderCost = order.costTWD || 0;
@@ -443,7 +457,21 @@ const DaigouApp = () => {
                                       {order.store}
                                    </span>
                               )}
+                              
+                              {/* 款項狀態按鈕 (顯示在上方資訊列) */}
+                              <button
+                                onClick={() => togglePaid(order.id)}
+                                className={`text-[10px] font-medium px-2 py-1 rounded-full flex items-center gap-1 transition-colors border ${
+                                  order.isPaid 
+                                    ? 'bg-green-50 text-green-600 border-green-200 hover:bg-green-100' 
+                                    : 'bg-stone-50 text-stone-400 border-stone-200 hover:bg-stone-100 hover:text-stone-500'
+                                }`}
+                              >
+                                {order.isPaid ? <CheckCircle size={10} /> : <Circle size={10} />}
+                                {order.isPaid ? '已匯款' : '未匯款'}
+                              </button>
                            </div>
+                           
                            {order.note && (
                               <div className="text-xs text-stone-500 pl-1 leading-relaxed">
                                  <span className="font-medium text-stone-400 mr-1">註:</span>{order.note}
