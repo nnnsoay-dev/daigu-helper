@@ -3,7 +3,7 @@ import {
   PlusCircle, Package, DollarSign, Trash2, Settings, Download, Upload, 
   AlertCircle, ShoppingBag, Truck, CheckCircle, Clock, Calculator, 
   Store, Calendar, Tag, Users, Plane, ClipboardList, Send, CreditCard,
-  Check, Circle, Edit, X, Filter
+  Check, Circle, Edit, X, Filter, TrendingUp, AlertTriangle, ArrowRight
 } from 'lucide-react';
 
 const DaigouApp = () => {
@@ -12,7 +12,7 @@ const DaigouApp = () => {
   const [orders, setOrders] = useState([]);
   const fileInputRef = useRef(null);
   
-  // 篩選狀態
+  // 篩選狀態：false = 只看未完成 (待辦), true = 顯示全部
   const [showAllOrders, setShowAllOrders] = useState(false);
 
   // 編輯模式狀態
@@ -31,7 +31,7 @@ const DaigouApp = () => {
     price: '',        
     status: 'checking',
     isPaid: false,          // 商品款項
-    isShippingPaid: false,  // 新增：國際運費款項
+    isShippingPaid: false,  // 國際運費款項
     note: ''
   });
 
@@ -54,7 +54,10 @@ const DaigouApp = () => {
   // --- 輔助計算 ---
   const calculateCostTWD = (krw, rate) => {
     if (!krw || !rate) return 0;
-    return Math.round(parseFloat(krw) / parseFloat(rate));
+    // 假設匯率輸入如果是 > 1 (如 40)，則用除法；如果 < 1 (如 0.025)，則用乘法
+    const k = parseFloat(krw);
+    const r = parseFloat(rate);
+    return r > 1 ? Math.round(k / r) : Math.round(k * r);
   };
 
   const formatCurrency = (num) => {
@@ -178,14 +181,14 @@ const DaigouApp = () => {
     e.preventDefault();
     if (!editingOrder) return;
 
-    // 重新計算成本 (防止編輯時沒更新到)
+    // 重新計算成本
     let finalTotalCostTWD = editingOrder.costTWD;
     if (editingOrder.costKRW && editingOrder.exchangeRate) {
       finalTotalCostTWD = calculateCostTWD(editingOrder.costKRW, editingOrder.exchangeRate);
     }
 
     const inputQuantity = Number(editingOrder.quantity) || 1;
-    const inputTotalPrice = Number(editingOrder.price) || 0; // 這裡的 price 對應 totalPrice 欄位
+    const inputTotalPrice = Number(editingOrder.price) || 0; 
 
     const updatedOrder = {
       ...editingOrder,
@@ -198,19 +201,17 @@ const DaigouApp = () => {
     };
 
     setOrders(orders.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-    setEditingOrder(null); // 關閉編輯視窗
+    setEditingOrder(null); 
   };
 
   const updateStatus = (id, newStatus) => {
     setOrders(orders.map(order => order.id === id ? { ...order, status: newStatus } : order));
   };
 
-  // 切換收款狀態
   const togglePaid = (id) => {
     setOrders(orders.map(order => order.id === id ? { ...order, isPaid: !order.isPaid } : order));
   };
 
-  // 切換運費狀態
   const toggleShippingPaid = (id) => {
     setOrders(orders.map(order => order.id === id ? { ...order, isShippingPaid: !order.isShippingPaid } : order));
   };
@@ -237,6 +238,15 @@ const DaigouApp = () => {
       }
     }, 0);
 
+    // 新增：未收金額計算 (只算商品款項 isPaid 為 false 的)
+    const totalUnpaid = orders.reduce((sum, order) => {
+      if (!order.isPaid) {
+        const revenue = order.totalPrice !== undefined ? order.totalPrice : (order.price * (order.quantity || 1));
+        return sum + revenue;
+      }
+      return sum;
+    }, 0);
+
     const netProfit = totalRevenue - totalCost;
     const profitMargin = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : 0;
     
@@ -246,7 +256,7 @@ const DaigouApp = () => {
       return acc;
     }, {});
 
-    return { totalRevenue, totalCost, netProfit, profitMargin, statusCounts };
+    return { totalRevenue, totalCost, netProfit, profitMargin, statusCounts, totalUnpaid };
   };
 
   const stats = calculateStats();
@@ -256,15 +266,30 @@ const DaigouApp = () => {
   const currentTotalRevenue = Number(newOrder.price) || 0;
   const currentProfit = currentTotalRevenue - currentTotalCostTWD;
 
-  // --- 篩選訂單邏輯 ---
-  // 顯示規則：如果是 "顯示全部"，則顯示所有訂單。
-  // 否則，過濾掉 "completed" 狀態的訂單，並只取前 5 筆 (假設 orders[0] 是最新的)。
+  // --- 篩選訂單邏輯 (更新) ---
+  // 修改：如果是 "顯示全部"，顯示所有訂單。
+  // 否則，顯示所有非 'completed' 的訂單 (不限制筆數)。
   const visibleOrders = showAllOrders 
     ? orders 
-    : orders.filter(o => o.status !== 'completed').slice(0, 5);
+    : orders.filter(o => o.status !== 'completed');
 
   return (
     <div className="min-h-screen bg-[#FDFBF7] text-stone-700 font-sans selection:bg-stone-200 relative">
+      {/* 字體設定：英文 MS Gothic, 中文 Zen Maru Gothic (粉圓體風格) */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap');
+        .font-sans {
+          font-family: 'MS Gothic', 'Zen Maru Gothic', sans-serif;
+        }
+        .fade-in {
+          animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(5px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+
       {/* 隱藏的檔案輸入框 */}
       <input 
         type="file" 
@@ -391,7 +416,7 @@ const DaigouApp = () => {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-stone-500 mb-1 ml-1">匯率 (TWD 1 : KRW ?)</label>
+                    <label className="block text-xs font-medium text-stone-500 mb-1 ml-1">匯率</label>
                     <input
                       type="number"
                       step="0.0001"
@@ -420,7 +445,7 @@ const DaigouApp = () => {
                   />
                 </div>
                 
-                {/* 收款狀態勾選框 (改為兩顆按鈕並排) */}
+                {/* 收款狀態勾選框 */}
                 <div className="grid grid-cols-2 gap-3">
                   <div 
                     className="flex items-center gap-2 bg-stone-50 p-3 rounded-xl cursor-pointer hover:bg-stone-100 transition-colors"
@@ -486,14 +511,14 @@ const DaigouApp = () => {
              {/* 篩選與空狀態控制 */}
              <div className="flex justify-between items-center mb-2 px-1">
                 <h3 className="text-sm font-bold text-stone-500">
-                  {showAllOrders ? '所有訂單' : '待辦事項 (近5筆)'}
+                  {showAllOrders ? '所有訂單' : '待辦事項 (未完成)'}
                 </h3>
                 <button 
                   onClick={() => setShowAllOrders(!showAllOrders)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${showAllOrders ? 'bg-stone-700 text-white shadow-md' : 'bg-white text-stone-500 border border-stone-200'}`}
                 >
                   <Filter size={12} />
-                  {showAllOrders ? '顯示全部' : '只看待辦'}
+                  {showAllOrders ? '顯示全部' : '只看未完成'}
                 </button>
              </div>
 
@@ -505,7 +530,7 @@ const DaigouApp = () => {
              ) : visibleOrders.length === 0 ? (
                 <div className="text-center py-20 text-stone-400">
                   <CheckCircle size={48} className="mx-auto mb-4 opacity-50 text-green-300" />
-                  <p>太棒了！目前沒有待辦事項。<br/>點擊右上方「顯示全部」查看歷史紀錄。</p>
+                  <p>太棒了！所有訂單都已完成。<br/>點擊「顯示全部」查看歷史紀錄。</p>
                 </div>
              ) : (
                visibleOrders.map((order) => {
@@ -545,7 +570,6 @@ const DaigouApp = () => {
                                    </span>
                               )}
                               
-                              {/* 款項狀態按鈕群組 */}
                               <div className="flex gap-1">
                                 <button
                                   onClick={() => togglePaid(order.id)}
@@ -653,16 +677,22 @@ const DaigouApp = () => {
         {activeTab === 'profit' && (
           <div className="space-y-6 fade-in">
             <div className="bg-stone-800 text-stone-50 rounded-3xl p-6 shadow-lg">
-              <h3 className="text-stone-400 text-sm font-medium mb-1">淨利潤 (Net Profit)</h3>
+              <h3 className="text-stone-400 text-sm font-medium mb-1 flex items-center gap-1"><TrendingUp size={16}/> 淨利潤 (Net Profit)</h3>
               <div className="text-4xl font-bold mb-4">{formatCurrency(stats.netProfit)}</div>
-              <div className="grid grid-cols-2 gap-4 border-t border-stone-600 pt-4">
+              
+              {/* 新增：未收金額欄位 */}
+              <div className="grid grid-cols-3 gap-2 border-t border-stone-600 pt-4 text-center">
                 <div>
                   <div className="text-stone-400 text-xs mb-1">總營收</div>
-                  <div className="font-semibold">{formatCurrency(stats.totalRevenue)}</div>
+                  <div className="font-semibold text-sm">{formatCurrency(stats.totalRevenue)}</div>
                 </div>
                 <div>
                   <div className="text-stone-400 text-xs mb-1">總成本</div>
-                  <div className="font-semibold">{formatCurrency(stats.totalCost)}</div>
+                  <div className="font-semibold text-sm">{formatCurrency(stats.totalCost)}</div>
+                </div>
+                <div>
+                  <div className="text-red-300 text-xs mb-1 flex items-center justify-center gap-1"><AlertTriangle size={10}/> 未收金額</div>
+                  <div className="font-semibold text-sm text-red-300">{formatCurrency(stats.totalUnpaid)}</div>
                 </div>
               </div>
             </div>
